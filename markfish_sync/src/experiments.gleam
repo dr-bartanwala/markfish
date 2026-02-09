@@ -15,27 +15,163 @@
 // hashing algori
 import file_streams/file_stream
 import file_streams/text_encoding
+import gleam/deque.{type Deque}
 import gleam/io
 import gleam/list
+import gleam/set.{type Set}
 import gleam/string
 import internal/parser.{type Chunk, chunkify}
+import mork
 import simplifile
 
+fn convert_to_html(chunks: List(Chunk), acc: String) -> String {
+  case chunks {
+    [chunk, ..rest] -> {
+      { acc <> { chunk.chunk_data |> mork.parse |> mork.to_html } }
+      |> convert_to_html(rest, _)
+    }
+    [] -> acc
+  }
+}
+
+const lookup_size = 5
+
+type Context {
+  Context(
+    index: Int,
+    pending: List(Int),
+    lookup: Set(Int),
+    lookup_elements: Deque(Int),
+  )
+}
+
+type Operation {
+  DoNothing
+  Delete(index: Int)
+  Insert(index: Int, value: Int)
+}
+
+fn refill_set(context: Context) -> Context {
+  case context.pending {
+    [new, ..rest] -> {
+      case context.lookup |> set.size < lookup_size {
+        True -> {
+          Context(
+            context.index,
+            rest,
+            context.lookup |> set.insert(new),
+            context.lookup_elements |> deque.push_back(new),
+          )
+          |> refill_set
+        }
+        False -> context
+      }
+    }
+    [] -> context
+  }
+}
+
+fn check_queue_front(context: Context, element: Int) -> Bool {
+  case context.lookup_elements |> deque.pop_front {
+    Ok(#(front, _)) -> element == front
+    _ -> False
+  }
+}
+
+fn lookup_set(context: Context, element: Int) -> Bool {
+  context.lookup |> set.contains(element)
+}
+
+fn roll_set(context: Context) -> Context {
+  let #(lookup_minus_front, rest_of_lookup_elements) = case
+    context.lookup_elements |> deque.pop_front
+  {
+    Ok(#(front, rest)) -> #(context.lookup |> set.delete(front), rest)
+    _ -> #(context.lookup, context.lookup_elements)
+  }
+
+  let #(lookup, rest_of_pending) = case context.pending {
+    [curr, ..rest] -> #(lookup_minus_front |> set.insert(curr), rest)
+    [] -> #(lookup_minus_front, [])
+  }
+
+  Context(context.index + 1, rest_of_pending, lookup, rest_of_lookup_elements)
+}
+
+fn extend_set(context: Context) -> Context {
+  let #(lookup, rest_of_pending, lookup_elements) = case context.pending {
+    [curr, ..rest] -> #(
+      context.lookup |> set.insert(curr),
+      rest,
+      context.lookup_elements |> deque.push_back(curr),
+    )
+
+    _ -> #(context.lookup, [], context.lookup_elements)
+  }
+  Context(context.index + 1, rest_of_pending, lookup, lookup_elements)
+  |> refill_set
+}
+
+fn shrink_set(context: Context) -> Context {
+  let #(lookup_minus_front, rest_of_lookup_elements) = case
+    context.lookup_elements |> deque.pop_front
+  {
+    Ok(#(front, rest)) -> #(context.lookup |> set.delete(front), rest)
+    _ -> #(context.lookup, context.lookup_elements)
+  }
+
+  Context(
+    context.index + 1,
+    context.pending,
+    lookup_minus_front,
+    rest_of_lookup_elements,
+  )
+  |> refill_set
+}
+
+//the diff function will consume a stream of chunks
+fn diff(new_hash: Int, context: Context) -> #(Context, Operation) {
+  io.println("Executing diff")
+  echo context
+  case context |> lookup_set(new_hash) {
+    True ->
+      case context |> check_queue_front(new_hash) {
+        True -> #(roll_set(context), DoNothing)
+        False -> #(shrink_set(context), Delete(context.index))
+      }
+
+    False -> #(extend_set(context), Insert(context.index, new_hash))
+  }
+}
+
+fn run_algo_loop(
+  new_hashes: List(Int),
+  context: Context,
+  acc: List(Operation),
+) -> #(Context, List(Operation)) {
+  case new_hashes {
+    [new_hash, ..rest] -> {
+      let #(new_context, op) = diff(new_hash, context)
+      run_algo_loop(rest, new_context, [op, ..acc])
+    }
+    [] -> #(context, acc |> list.reverse)
+  }
+}
+
+fn run_algo(hashes, new_hashes) -> #(Context, List(Operation)) {
+  let context = Context(0, hashes, set.new(), deque.new()) |> refill_set
+  run_algo_loop(new_hashes, context, [])
+}
+
 pub fn execute() -> Nil {
-  let filename = "./sample/test_suite.md"
-  let assert Ok(file) = simplifile.read(filename)
-  io.println(file)
-  let encoding = text_encoding.Unicode
-
-  let assert Ok(stream) = file_stream.open_read_text(filename, encoding)
-
-  let chunks = chunkify(stream)
-
-  io.println("Chunkify Output")
-  list.each(chunks, fn(chunk: Chunk) {
-    io.println("////////////Chunk Start//////////")
-    io.println(chunk.chunk_hash |> string.inspect)
-    list.each(chunk.chunk_data, fn(line: String) { io.print(line) })
-    io.println("////////////Chunk End////////////")
-  })
+  let _filename = "./sample/test_suite.md"
+  let hashes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+  let new_hashes = [1, 2, 3, 5, 8, 10, 15, 11]
+  let generated_hashes = run_algo(hashes, new_hashes)
+  echo hashes
+  echo new_hashes
+  echo generated_hashes.1
+  io.println("terminated")
+  //let encoding = text_encoding.Unicode
+  //let assert Ok(stream) = file_stream.open_read_text(filename, encoding)
 }
