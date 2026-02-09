@@ -7,12 +7,19 @@
 
 import file_streams/file_stream
 import gleam/int
-import gleam/io
 import gleam/list
+import gleam/result
 import gleam/string
 
+//values for calculating FNV rolling hash
+const fnv_prime = 1_099_511_628_211
+
+const fnv_offset_basis = 14_695_981_039_346_656_037
+
+const fnv_mask_64 = 0xffffffffffffffff
+
 pub type Chunk {
-  Chunk(chunk_hash: String, chunk_data: List(String))
+  Chunk(chunk_hash: Int, chunk_data: List(String))
 }
 
 pub fn chunkify(stream) -> List(Chunk) {
@@ -139,14 +146,36 @@ fn should_exit_chunk(chunk_type, line_style, prev_line) -> ExitType {
   }
 }
 
+fn perform_running_hash(running_hash: Int, line: String) -> Int {
+  case string.pop_grapheme(line) {
+    Ok(#(char, rest)) ->
+      char
+      |> string.to_utf_codepoints
+      |> list.first
+      |> result.map(fn(unicode) {
+        unicode
+        |> string.utf_codepoint_to_int
+        |> int.bitwise_exclusive_or(
+          running_hash * fnv_prime |> int.bitwise_and(fnv_mask_64),
+        )
+      })
+      |> result.unwrap(running_hash)
+      |> perform_running_hash(rest)
+
+    Error(_) -> running_hash
+  }
+}
+
 fn parse_chunk_loop(
   stream,
+  running_hash: Int,
   current_chunk_type: ChunkType,
   previous_line_style: LineStyle,
   current_chunk: List(String),
-) -> #(String, List(String), Bool) {
+) -> #(Chunk, Bool) {
   case file_stream.read_line(stream) {
-    Error(_) -> #("hash", current_chunk |> list.reverse, True)
+    Error(_) -> #(Chunk(running_hash, current_chunk |> list.reverse), True)
+
     Ok(line) -> {
       let line_style = determine_line_style(line)
       let new_chunk_type = case current_chunk_type {
@@ -158,29 +187,37 @@ fn parse_chunk_loop(
         should_exit_chunk(current_chunk_type, line_style, previous_line_style)
       {
         Continue ->
-          parse_chunk_loop(stream, new_chunk_type, line_style, [
-            line,
-            ..current_chunk
-          ])
-        ExitInclude -> #("hash", [line, ..current_chunk] |> list.reverse, False)
-        ExitSkip -> #("hash", current_chunk |> list.reverse, False)
+          parse_chunk_loop(
+            stream,
+            perform_running_hash(running_hash, line),
+            new_chunk_type,
+            line_style,
+            [line, ..current_chunk],
+          )
+        ExitInclude -> #(
+          Chunk(
+            perform_running_hash(running_hash, line),
+            [line, ..current_chunk] |> list.reverse,
+          ),
+          False,
+        )
+        ExitSkip -> #(Chunk(running_hash, current_chunk |> list.reverse), False)
       }
     }
   }
 }
 
-fn parse_chunk(stream) -> #(String, List(String), Bool) {
-  parse_chunk_loop(stream, New, None, [])
+fn parse_chunk(stream) -> #(Chunk, Bool) {
+  parse_chunk_loop(stream, fnv_offset_basis, New, None, [])
 }
 
 fn chunkify_loop(stream, chunks: List(Chunk), break: Bool) -> List(Chunk) {
-  io.println("Running chunkify")
   case break {
     True -> chunks |> list.reverse
     False ->
       parse_chunk(stream)
       |> fn(tuple) -> List(Chunk) {
-        chunkify_loop(stream, [Chunk(tuple.0, tuple.1), ..chunks], tuple.2)
+        chunkify_loop(stream, [tuple.0, ..chunks], tuple.1)
       }
   }
 }
