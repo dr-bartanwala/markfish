@@ -90,12 +90,16 @@ fn roll_set(context: Context) -> Context {
     _ -> #(context.lookup, context.lookup_elements)
   }
 
-  let #(lookup, rest_of_pending) = case context.pending {
-    [curr, ..rest] -> #(lookup_minus_front |> set.insert(curr), rest)
-    [] -> #(lookup_minus_front, [])
+  let #(lookup, lookup_elements, rest_of_pending) = case context.pending {
+    [curr, ..rest] -> #(
+      lookup_minus_front |> set.insert(curr),
+      rest_of_lookup_elements |> deque.push_back(curr),
+      rest,
+    )
+    [] -> #(lookup_minus_front, rest_of_lookup_elements, [])
   }
 
-  Context(context.index + 1, rest_of_pending, lookup, rest_of_lookup_elements)
+  Context(context.index + 1, rest_of_pending, lookup, lookup_elements)
 }
 
 fn extend_set(context: Context) -> Context {
@@ -121,7 +125,7 @@ fn shrink_set(context: Context) -> Context {
   }
 
   Context(
-    context.index + 1,
+    context.index,
     context.pending,
     lookup_minus_front,
     rest_of_lookup_elements,
@@ -129,18 +133,26 @@ fn shrink_set(context: Context) -> Context {
   |> refill_set
 }
 
-//the diff function will consume a stream of chunks
 fn diff(new_hash: Int, context: Context) -> #(Context, Operation) {
   io.println("Executing diff")
-  echo context
+  echo new_hash
   case context |> lookup_set(new_hash) {
     True ->
       case context |> check_queue_front(new_hash) {
-        True -> #(roll_set(context), DoNothing)
-        False -> #(shrink_set(context), Delete(context.index))
+        True -> {
+          echo "rolling set"
+          #(roll_set(context), DoNothing)
+        }
+        False -> {
+          echo "shrinking set"
+          #(shrink_set(context), Delete(context.index))
+        }
       }
 
-    False -> #(extend_set(context), Insert(context.index, new_hash))
+    False -> {
+      echo "extending_set"
+      #(extend_set(context), Insert(context.index, new_hash))
+    }
   }
 }
 
@@ -152,7 +164,10 @@ fn run_algo_loop(
   case new_hashes {
     [new_hash, ..rest] -> {
       let #(new_context, op) = diff(new_hash, context)
-      run_algo_loop(rest, new_context, [op, ..acc])
+      case op {
+        Delete(_) -> run_algo_loop(new_hashes, new_context, [op, ..acc])
+        _ -> run_algo_loop(rest, new_context, [op, ..acc])
+      }
     }
     [] -> #(context, acc |> list.reverse)
   }
@@ -165,8 +180,8 @@ fn run_algo(hashes, new_hashes) -> #(Context, List(Operation)) {
 
 pub fn execute() -> Nil {
   let _filename = "./sample/test_suite.md"
-  let hashes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-  let new_hashes = [1, 2, 3, 5, 8, 10, 15, 11]
+  let hashes = [5, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 10, 10, 145]
+  let new_hashes = [1, 2, 3, 5, 8, 10, 15, 11, 19, 12, 145, 10, 120, 10, 12]
   let generated_hashes = run_algo(hashes, new_hashes)
   echo hashes
   echo new_hashes
