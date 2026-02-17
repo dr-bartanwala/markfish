@@ -1,11 +1,4 @@
 NIP-46
-
-HELLO WORLD HELLO WORLD
-
-Whats up bro ??
-
-
-HELLO I AM HERE BACK AGAIN
 ======
 
 Nostr Remote Signing

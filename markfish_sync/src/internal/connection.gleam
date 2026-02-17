@@ -83,7 +83,7 @@ fn fill_header(config: ConnectionConfig, data: String) -> String {
   <> data_delimiter
   <> config.password
   <> data_delimiter
-  <> config.file |> filepath.base_name |> filepath.strip_extension
+  <> config.file |> filepath.strip_extension
   <> data_delimiter
   <> data
 }

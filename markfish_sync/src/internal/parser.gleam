@@ -18,6 +18,10 @@ pub fn chunkify(stream) -> List(Chunk) {
   chunkify_loop(stream, [], False)
 }
 
+pub fn parse_chunk(stream) -> #(Chunk, Bool) {
+  parse_chunk_loop(stream, fnv_offset_basis, New, None, "")
+}
+
 type ChunkType {
   New
   Paragraph
@@ -197,10 +201,6 @@ fn parse_chunk_loop(
       }
     }
   }
-}
-
-pub fn parse_chunk(stream) -> #(Chunk, Bool) {
-  parse_chunk_loop(stream, fnv_offset_basis, New, None, "")
 }
 
 fn chunkify_loop(stream, chunks: List(Chunk), break: Bool) -> List(Chunk) {

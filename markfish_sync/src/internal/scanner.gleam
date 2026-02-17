@@ -1,10 +1,13 @@
 //a scanner will scan for changes and maintain connection for each file
 //start the scanner with a base dir, and it will maintain child scanners + connections for all child files
+import filepath
 import gleam
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
+import gleam/list
 import gleam/otp/actor
 import gleam/result
+import gleam/string
 import internal/connection.{
   type ConnectionConfig, type Message, ConnectionConfig, start_connection,
 }
@@ -58,10 +61,14 @@ fn handle_child_scanner_message(
       actor.continue(new_state)
     }
     Tick -> {
-      case syncfile(state.file, state.connection) {
+      case
+        syncfile(
+          state.common_info.base_dir |> filepath.join(state.file),
+          state.connection,
+        )
+      {
         True -> {
           process.send(state.self, Tick)
-          echo "TICK RESET"
           actor.continue(ChildScannerInfo(..state, counter: 0))
         }
 
@@ -123,19 +130,23 @@ fn create_child_scanner(state: ScannerInfo, file: String) -> ScannerInfo {
   )
 }
 
+fn trim_base_dir(full_path: String, base_dir: String) {
+  full_path |> string.replace(base_dir, "")
+}
+
 fn handle_scan_internal(list, state) -> ScannerInfo {
   case list {
-    [file, ..rest] ->
+    [file, ..rest] -> {
       state |> create_child_scanner(file) |> handle_scan_internal(rest, _)
+    }
     [] -> state
   }
 }
 
 fn handle_scan(state: ScannerInfo) -> ScannerInfo {
-  let files = simplifile.get_files(state.common_info.base_dir)
-  echo files
   simplifile.get_files(state.common_info.base_dir)
   |> result.unwrap([])
+  |> list.map(trim_base_dir(_, state.common_info.base_dir))
   |> handle_scan_internal(state)
 }
 
