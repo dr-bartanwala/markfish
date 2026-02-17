@@ -76,4 +76,4 @@ Currently markfish can't handle all properties of links, for example if you do:
 [link](this is the link)
 ----
 
-The parser's code is pretty self-explainatory so i don't think i will repeat all nuances here
+The parser's code is pretty self-explainatory so i don't think i will repeat all the nuances here
