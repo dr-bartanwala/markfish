@@ -2,15 +2,17 @@ import ewe.{type Request, type Response}
 import filepath
 import gleam/bit_array
 import gleam/erlang/process.{type Subject}
-import gleam/http/request
 import gleam/http/response
 import gleam/list
 import gleam/result
 import gleam/string
-import gleam/time/timestamp
-import internal/stateman.{type StatemanMessage, Add, Get, Remove, Sync}
+import internal/stateman.{Add, Get, Remove, Sync}
 
 const delimiter = "||"
+
+pub type RouterConfig {
+  RouterConfig(user: String, password: String)
+}
 
 type Operation {
   Insert(index: Int, value: Int, blockdata: String)
@@ -24,20 +26,25 @@ type Stream {
   Done
 }
 
-pub fn router(req: Request, state) -> Response {
-  case req |> request.path_segments {
-    [] -> handle_file_request(req, state, "home")
+pub fn router(req: Request, state, config: RouterConfig) -> Response {
+  case req.path {
+    "/" -> handle_file_request(req, state, "home")
 
-    ["message"] -> handle_message(req, state)
+    "/message" -> handle_message(req, state, config)
 
-    ["file", file_name] -> handle_file_request(req, state, file_name)
+    "/file/" <> file_name ->
+      handle_file_request(req, state, file_name |> clean_file_name)
 
     _ -> return_invalid_response()
   }
 }
 
+fn clean_file_name(req_file_name) {
+  req_file_name |> string.replace("%20", " ")
+}
+
 fn stream_file(
-  folded_file_name: String,
+  file_name: String,
   block_hashes: List(Int),
   subject: Subject(Stream),
   state,
@@ -45,25 +52,25 @@ fn stream_file(
   case block_hashes {
     [hash, ..rest] -> {
       let data =
-        process.call(state, 100, Get(_, folded_file_name, hash))
+        process.call(state, 100, Get(_, file_name, hash))
         |> bit_array.from_string
 
       process.send(subject, Chunk(data))
-      stream_file(folded_file_name, rest, subject, state)
+      stream_file(file_name, rest, subject, state)
     }
     [] -> process.send(subject, Done)
   }
 }
 
-fn send_file(req: Request, folded_file_name: String, state) -> Response {
+fn send_file(req: Request, file_name: String, state) -> Response {
   //calling stateman for getting the hashes 
-  let hashes = process.call(state, 100, Sync(_, folded_file_name))
+  let hashes = process.call(state, 100, Sync(_, file_name))
   ewe.chunked_body(
     req,
     response.new(200) |> response.set_header("content-type", "text/html"),
     on_init: fn(subject) {
       let _pid =
-        fn() { stream_file(folded_file_name, hashes, subject, state) }
+        fn() { stream_file(file_name, hashes, subject, state) }
         |> process.spawn
     },
     handler: fn(chunked_body, state, message) {
@@ -130,18 +137,18 @@ fn determine_operation(base64_data: String) -> Operation {
   }
 }
 
-fn execute_operation(folded_file_name, operation: Operation, state) -> Response {
+fn execute_operation(file_name, operation: Operation, state) -> Response {
   case operation {
     Insert(index, hash, block_data) -> {
-      process.send(state, Add(folded_file_name, index, hash, block_data))
+      process.send(state, Add(file_name, index, hash, block_data))
       return_valid_response()
     }
     Delete(index) -> {
-      process.send(state, Remove(folded_file_name, index))
+      process.send(state, Remove(file_name, index))
       return_valid_response()
     }
     Fetch -> {
-      process.call(state, 100, Sync(_, folded_file_name))
+      process.call(state, 100, Sync(_, file_name))
       |> list.fold(<<>>, fn(acc: BitArray, val: Int) -> BitArray {
         acc |> bit_array.append(<<val:64>>)
       })
@@ -154,91 +161,68 @@ fn execute_operation(folded_file_name, operation: Operation, state) -> Response 
   }
 }
 
-fn execute_message(
-  folded_file_name: String,
-  base64_data: String,
-  state,
-) -> Response {
+fn execute_message(file_name: String, base64_data: String, state) -> Response {
   determine_operation(base64_data)
-  |> execute_operation(folded_file_name, _, state)
+  |> execute_operation(file_name, _, state)
+}
+
+fn expand_file_path(file_name) {
+  filepath.expand(file_name)
 }
 
 fn authenticate_and_proceed(
   user,
   password,
-  folded_file_name,
+  file_name,
   base64_data,
   state,
+  config: RouterConfig,
 ) -> Response {
-  let valid_user = "default"
-  let valid_password = "default"
-  case
-    { valid_user == user }
-    && { valid_password == password }
-    && { valid_user != "error" }
-    && { valid_password != "error" }
-  {
-    True -> execute_message(folded_file_name, base64_data, state)
+  let valid_user = config.user
+  let valid_password = config.password
+  case { valid_user == user } && { valid_password == password } {
+    True ->
+      case expand_file_path(file_name) {
+        Ok(expanded_file_name) ->
+          execute_message(expanded_file_name, base64_data, state)
+        Error(_) -> return_invalid_response()
+      }
     False -> return_invalid_response()
   }
 }
 
-fn handle_message_internal(body: String, state) -> Response {
+fn handle_message_internal(body: String, state, config) -> Response {
   case body |> string.split(delimiter) {
-    [user, password, file_name, base64_data] -> {
-      case file_name |> fold_file_name {
-        Ok(folded_file_name) ->
-          authenticate_and_proceed(
-            user,
-            password,
-            folded_file_name,
-            base64_data,
-            state,
-          )
-        Error(_) -> return_invalid_response()
-      }
-    }
+    [user, password, file_name, base64_data] ->
+      authenticate_and_proceed(
+        user,
+        password,
+        file_name,
+        base64_data,
+        state,
+        config,
+      )
     _ -> {
       return_invalid_response()
     }
   }
 }
 
-fn fold_file_name_internal(list: List(String), acc: String) -> String {
-  case list {
-    [val] -> {
-      acc <> val
-    }
-    [val, ..rest] -> {
-      acc <> val <> "_" |> fold_file_name_internal(rest, _)
-    }
-    [] -> acc
-  }
-}
-
-fn fold_file_name(file_name: String) -> Result(String, Nil) {
-  case filepath.expand(file_name) {
-    Ok(path) -> filepath.split(file_name) |> fold_file_name_internal("") |> Ok
-
-    _ -> Error(Nil)
-  }
-}
-
-fn handle_message(req: Request, state) -> Response {
+fn handle_message(req: Request, state, config) -> Response {
   case req |> ewe.read_body(10_240) {
     Ok(ewe_req) -> {
       ewe_req.body
       |> bit_array.to_string
       |> result.unwrap("")
-      |> handle_message_internal(state)
+      |> handle_message_internal(state, config)
     }
     Error(_) -> return_invalid_response()
   }
 }
 
 fn handle_file_request(req: Request, state, file_name: String) -> Response {
-  case file_name |> fold_file_name {
-    Ok(folded_file_name) -> send_file(req, folded_file_name, state)
-    _ -> return_invalid_response()
+  case expand_file_path(file_name) {
+    Ok(expanded_file_name) -> send_file(req, expanded_file_name, state)
+    Error(_) -> return_invalid_response()
   }
 }

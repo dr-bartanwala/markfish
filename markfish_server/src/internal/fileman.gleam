@@ -1,9 +1,9 @@
-import envoy
 import filepath
 import gleam/erlang/process.{type Subject}
 import gleam/otp/actor
 import simplifile
 
+//receives validated & expanded filenames from the router
 pub type FilemanMessage {
   ReadFile(reply_with: Subject(String), file_name: String)
   WriteFile(file_name: String, data: String)
@@ -19,12 +19,8 @@ type Write {
   Delete(file: String)
 }
 
-fn extend_file_name(filename: String) -> String {
-  filename
-}
-
 fn handle_read(state, message: Read) {
-  let out = case message.file |> extend_file_name |> simplifile.read {
+  let out = case message.file |> simplifile.read {
     Ok(val) -> {
       val
     }
@@ -35,8 +31,8 @@ fn handle_read(state, message: Read) {
 }
 
 fn handle_write(state, message: Write) {
-  let assert Ok(_) = case message {
-    Write(file, data) -> file |> extend_file_name |> simplifile.write(data)
+  let _ = case message {
+    Write(file, data) -> file |> simplifile.write(data)
     Delete(file) -> simplifile.delete(file)
   }
   actor.continue(state)
@@ -101,8 +97,7 @@ type State {
   )
 }
 
-pub fn start_fileman() {
-  let assert Ok(directory) = envoy.get("DIR")
+pub fn start_fileman(directory) {
   let file_reader = get_filereader(directory)
   let file_writer = get_filewriter(directory)
   let assert Ok(actor) =

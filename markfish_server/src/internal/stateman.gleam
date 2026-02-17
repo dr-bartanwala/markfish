@@ -1,5 +1,3 @@
-import envoy
-import filepath
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
@@ -9,9 +7,8 @@ import gleam/string
 import internal/fileman.{
   type FilemanMessage, DeleteFile, ReadFile, WriteFile, start_fileman,
 }
-import simplifile
+import mork
 
-//the filename received is the folded filename : "dir_dir_dir_filename" 
 pub type StatemanMessage {
   Add(file: String, index: Int, blockhash: Int, blockdata: String)
   Get(reply_with: Subject(String), file: String, blockhash: Int)
@@ -23,8 +20,8 @@ type InternalState {
   InternalState(fileman: Subject(FilemanMessage))
 }
 
-pub fn start_stateman() {
-  let fileman = start_fileman()
+pub fn start_stateman(directory) {
+  let fileman = start_fileman(directory)
   let state = InternalState(fileman)
   let assert Ok(actor) =
     actor.new(state) |> actor.on_message(handle_message) |> actor.start
@@ -34,19 +31,11 @@ pub fn start_stateman() {
 //determines the storage structure for all files
 //appends file with extentions
 fn get_filename(file: String, blockhash: Int) -> String {
-  let file_name =
-    "/data/" <> file <> "/blocks/" <> blockhash |> int.to_string <> ".html"
-  let _ = simplifile.create_file(file_name)
-  file_name
+  "/data/" <> file <> "/blocks/" <> blockhash |> int.to_string <> ".html"
 }
 
 fn get_blockdata_filename(file: String) -> String {
-  let file_name = {
-    "/data/" <> file <> "/blockdata.markfish"
-  }
-  let _ = simplifile.create_directory_all(file_name |> filepath.directory_name)
-  let _ = simplifile.create_file(file_name)
-  file_name
+  "/data/" <> file <> "/blockdata.markfish"
 }
 
 fn apply_insert(current_state: List(Int), index: Int, val: Int) -> List(Int) {
@@ -120,7 +109,13 @@ fn handle_sync(state: InternalState, file: String) -> List(Int) {
 fn handle_message(state: InternalState, msg: StatemanMessage) {
   case msg {
     Add(file, index, blockhash, blockdata) -> {
-      handle_add(state, file, index, blockhash, blockdata)
+      handle_add(
+        state,
+        file,
+        index,
+        blockhash,
+        blockdata |> mork.parse |> mork.to_html,
+      )
       actor.continue(state)
     }
 

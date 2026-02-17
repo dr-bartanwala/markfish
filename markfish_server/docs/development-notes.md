@@ -1,4 +1,14 @@
-# Rough Development Notes
+# Autistic Rough Development Notes
+
+16/2/26
+-> A v0 implementation completed, basic functionality is working just fine
+-> TODO Features: 
+-> Dockerize
+-> Add references support (images, and attachments), by hosting static content
+-> Refractor where ever needed
+-> Most importantly make an obsidian plugin
+
+
 10/2/26
 -> Working with the server
 
