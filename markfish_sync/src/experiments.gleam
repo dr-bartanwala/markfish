@@ -11,15 +11,18 @@
 //   link_hash, List<link_hashes>
 //
 //
+
+// hashing algori
 import file_streams/file_stream
 import file_streams/text_encoding
 import gleam/io
 import gleam/list
+import gleam/string
 import internal/parser.{type Chunk, chunkify}
 import simplifile
 
 pub fn execute() -> Nil {
-  let filename = "./test_suite.md"
+  let filename = "./sample/test_suite.md"
   let assert Ok(file) = simplifile.read(filename)
   io.println(file)
   let encoding = text_encoding.Unicode
@@ -31,6 +34,7 @@ pub fn execute() -> Nil {
   io.println("Chunkify Output")
   list.each(chunks, fn(chunk: Chunk) {
     io.println("////////////Chunk Start//////////")
+    io.println(chunk.chunk_hash |> string.inspect)
     list.each(chunk.chunk_data, fn(line: String) { io.print(line) })
     io.println("////////////Chunk End////////////")
   })
