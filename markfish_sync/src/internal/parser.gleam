@@ -1,17 +1,9 @@
-// A Markdown chunk creator
-// TODO: Implement a hash function
-// Time Complexity O(N), worst case 2*N iterations (2 iterations per line)
-// Parsing in a single pass is extremely complecated, 
-// In the current implementation for most lines, only the first three characters are iterated through
-// Space Complexity: Max Chunk Size, worst case O(N) 
-
 import file_streams/file_stream
 import gleam/int
 import gleam/list
 import gleam/result
 import gleam/string
 
-//values for calculating FNV rolling hash
 const fnv_prime = 1_099_511_628_211
 
 const fnv_offset_basis = 14_695_981_039_346_656_037
@@ -19,7 +11,7 @@ const fnv_offset_basis = 14_695_981_039_346_656_037
 const fnv_mask_64 = 0xffffffffffffffff
 
 pub type Chunk {
-  Chunk(chunk_hash: Int, chunk_data: List(String))
+  Chunk(chunk_hash: Int, chunk_data: String)
 }
 
 pub fn chunkify(stream) -> List(Chunk) {
@@ -171,10 +163,10 @@ fn parse_chunk_loop(
   running_hash: Int,
   current_chunk_type: ChunkType,
   previous_line_style: LineStyle,
-  current_chunk: List(String),
+  current_chunk_data: String,
 ) -> #(Chunk, Bool) {
   case file_stream.read_line(stream) {
-    Error(_) -> #(Chunk(running_hash, current_chunk |> list.reverse), True)
+    Error(_) -> #(Chunk(running_hash, current_chunk_data), True)
 
     Ok(line) -> {
       let line_style = determine_line_style(line)
@@ -192,23 +184,23 @@ fn parse_chunk_loop(
             perform_running_hash(running_hash, line),
             new_chunk_type,
             line_style,
-            [line, ..current_chunk],
+            current_chunk_data <> line,
           )
         ExitInclude -> #(
           Chunk(
             perform_running_hash(running_hash, line),
-            [line, ..current_chunk] |> list.reverse,
+            current_chunk_data <> line,
           ),
           False,
         )
-        ExitSkip -> #(Chunk(running_hash, current_chunk |> list.reverse), False)
+        ExitSkip -> #(Chunk(running_hash, current_chunk_data), False)
       }
     }
   }
 }
 
-fn parse_chunk(stream) -> #(Chunk, Bool) {
-  parse_chunk_loop(stream, fnv_offset_basis, New, None, [])
+pub fn parse_chunk(stream) -> #(Chunk, Bool) {
+  parse_chunk_loop(stream, fnv_offset_basis, New, None, "")
 }
 
 fn chunkify_loop(stream, chunks: List(Chunk), break: Bool) -> List(Chunk) {
