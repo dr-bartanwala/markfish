@@ -5,6 +5,9 @@ import gleam/io
 import internal/connection.{type Message, GetState, start_connection}
 import internal/diff.{type Context, type Operation, sync}
 import internal/parser.{type Chunk, parse_chunk}
+import internal/scanner.{
+  type CommonInfo, type ScannerMessage, CommonInfo, Scan, get_scanner,
+}
 
 fn sync_loop(stream, context: Context, server_addr) {
   let #(chunk, break) = parse_chunk(stream)
@@ -49,21 +52,27 @@ fn syncfile(file_name: String, server_addr: Subject(Message)) {
   let assert Ok(stream) = file_stream.open_read_text(file_name, encoding)
   let existing_state = process.call(server_addr, 10_000, GetState)
   sync_loop(stream, diff.get_new_context(existing_state), server_addr)
-  process.sleep_forever()
 }
 
 fn run_test() {
-  let suite = "./test/sample/test_suite.md"
-  let modified_suite = "./test/sample/test_suite_modified.md"
+  let base_dir = "./test/sample/"
+  let suite = "test_suite.md"
+
+  let modified_suite = "test_suite_modified.md"
 
   let server_addr = "http://localhost:8000"
   let config =
     connection.ConnectionConfig(suite, server_addr, "default", "default")
-  let subject = start_connection(config)
-  syncfile(suite, subject)
+
+  let scanner =
+    get_scanner(CommonInfo(base_dir, "default", "default", server_addr))
+
+  process.send(scanner, Scan)
+  process.sleep_forever()
 }
 
 pub fn execute() -> Nil {
   run_test()
   io.println("completed")
+  process.sleep_forever()
 }
