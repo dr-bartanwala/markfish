@@ -1,8 +1,6 @@
 import file_streams/file_stream
 import file_streams/text_encoding
-import gleam/deque.{type Deque}
 import gleam/erlang/process.{type Subject}
-import gleam/set.{type Set}
 import internal/diff.{type Context, type Operation, sync}
 import internal/parser.{type Chunk, parse_chunk}
 import internal/test_server.{type Message, GetState, start_connection}
@@ -55,6 +53,7 @@ fn syncfile(file_name: String, server_addr: Subject(Message)) {
 fn execute_test(file, modified_file) {
   //sync processA, modify with modified state
   //sync processB with modified data
+  //and parse 
   //compare the state
   let subject = start_connection([], [])
   syncfile(file, subject)

@@ -1,4 +1,10 @@
 # Rough Development Notes
+10/2/26
+-> Working with the server
+
+9/2/26
+-> The core aspects are all completed, next will implement a websocket + http direct server
+
 7/2/26
 -> Completed the diffining algorithm implementation
 -> Architecture of the sync server

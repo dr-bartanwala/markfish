@@ -1,4 +1,7 @@
+import filepath
 import gleam/erlang/process.{type Subject}
+import gleam/hackney
+import gleam/http
 import gleam/http/request
 import gleam/http/response
 import gleam/httpc
@@ -10,15 +13,9 @@ import gleam/time/timestamp
 
 import gleam/bit_array
 
-const state_expiration_time = 5.0
+const state_expiration_time = 500.0
 
-const data_delimiter = "\r\n"
-
-//the connection process will crash without throwing any error in case the connection to the server doesn't work
-//this will be handled by the parent process which will act like a superviser
-//
-// parent -> gets a request with sync(file_name) : invokes a process specifically for that task, and keeps it running
-// and if the process crashes then it gives a response
+const data_delimiter = "||"
 
 pub type ConnectionConfig {
   ConnectionConfig(
@@ -30,8 +27,8 @@ pub type ConnectionConfig {
 }
 
 type ServerRequest {
-  InsertReq(data: String)
-  DeleteReq(data: String)
+  InsertReq(data: BitArray)
+  DeleteReq(data: BitArray)
   SyncReq
 }
 
@@ -42,15 +39,79 @@ pub type Message {
   GetState(reply_with: Subject(List(Int)))
 }
 
-//this function can fail
 fn call_server_internal(address: String, body: String) -> String {
+  echo "calling server"
+  echo timestamp.system_time()
   let assert Ok(base_req) = request.to(address)
+
+  let req =
+    base_req
+    |> request.set_method(http.Post)
+    |> request.set_scheme(http.Http)
+    |> request.prepend_header("accept", "text/plain; charset=UTF-8")
+    |> request.set_body(body)
+
+  echo "req"
+  echo req
+
+  let out = case hackney.send(req) {
+    Ok(resp) -> {
+      case resp.status == 200 {
+        True -> resp.body
+        False -> {
+          echo "call failed"
+          echo resp.body
+          ""
+        }
+      }
+    }
+    _ -> {
+      echo "threw error"
+      ""
+    }
+  }
+
+  echo "calling server complete"
+  echo timestamp.system_time()
+  out
+}
+
+fn not_call_server_internal(address: String, body: String) -> String {
+  echo "calling server"
+  echo timestamp.system_time()
+  let req = request.to(address)
+  echo req
+  let base_req =
+    request.new()
+    |> request.set_method(http.Post)
+    |> request.set_host("127.0.0.1")
+    |> request.set_port(8000)
+    |> request.set_path("/message")
+    |> request.set_scheme(http.Http)
+
   let req =
     request.prepend_header(base_req, "accept", "text/plain; charset=UTF-8")
+    |> request.prepend_header("connection", "keep-alive")
     |> request.set_body(body)
-  let assert Ok(resp) = httpc.send(req)
-  assert resp.status == 200
-  resp.body
+
+  let out = case httpc.send(req) {
+    Ok(resp) -> {
+      case resp.status == 200 {
+        True -> resp.body
+        False -> {
+          echo "call failed"
+          ""
+        }
+      }
+    }
+    _ -> {
+      echo "threw error"
+      ""
+    }
+  }
+  echo "calling server complete"
+  echo timestamp.system_time()
+  out
 }
 
 fn get_list_from_bitarray(array: BitArray, acc: List(Int)) {
@@ -61,7 +122,6 @@ fn get_list_from_bitarray(array: BitArray, acc: List(Int)) {
 }
 
 fn modify_state_from_output(output: String, state: State) -> State {
-  //the sync request will output a list of integers, size 6
   let hashes =
     get_list_from_bitarray(
       output |> bit_array.base64_decode |> result.unwrap(<<>>),
@@ -75,44 +135,51 @@ fn fill_header(config: ConnectionConfig, data: String) -> String {
   <> data_delimiter
   <> config.password
   <> data_delimiter
-  <> config.file
+  <> config.file |> filepath.base_name |> filepath.strip_extension
   <> data_delimiter
   <> data
 }
 
 fn call_server(request: ServerRequest, state: State) -> State {
   case request {
-    InsertReq(data) -> <<1:64>> |> bit_array.base64_encode(False) <> data
+    InsertReq(data) ->
+      <<1:64>> |> bit_array.append(data) |> bit_array.base64_encode(False)
 
-    DeleteReq(data) -> <<0:64>> |> bit_array.base64_encode(False) <> data
+    DeleteReq(data) ->
+      <<0:64>> |> bit_array.append(data) |> bit_array.base64_encode(False)
 
-    SyncReq -> ""
+    SyncReq -> <<2:64>> |> bit_array.base64_encode(False)
   }
   |> fn(data: String) -> State {
     let output =
       fill_header(state.config, data)
-      |> call_server_internal(state.config.server_address <> "/message")
+      |> call_server_internal(state.config.server_address <> "/message", _)
+
     case output {
-      "" -> state
+      "" if request == SyncReq -> {
+        echo "this was a sync request still empty"
+        state
+      }
+      "" -> {
+        state
+      }
       _ -> state |> modify_state_from_output(output, _)
     }
   }
 }
 
-// we are using an FNV 64bit hash, so the int value will be set to 64bit
 fn encode_to_base64(msg: Message) -> ServerRequest {
   case msg {
-    Insert(index, value, block_data) ->
+    Insert(index, value, block_data) -> {
       <<index:64>>
       |> bit_array.append(<<value:64>>)
       |> bit_array.append(block_data |> bit_array.from_string)
-      |> bit_array.base64_encode(True)
       |> InsertReq
-
-    Delete(index) ->
+    }
+    Delete(index) -> {
       <<index:64>>
-      |> bit_array.base64_encode(True)
       |> DeleteReq
+    }
 
     SyncState(_) -> SyncReq
     GetState(_) -> SyncReq
@@ -120,13 +187,19 @@ fn encode_to_base64(msg: Message) -> ServerRequest {
 }
 
 fn sync_state_if_required(state: State) -> State {
+  echo "syncstate check starts"
+  echo timestamp.system_time()
   let state_timestamp: Float = state.latest_fetch_timestamp
   let current_timestamp: Float =
     timestamp.system_time() |> timestamp.to_unix_seconds
-  case current_timestamp -. state_timestamp >. state_expiration_time {
+
+  let out = case current_timestamp -. state_timestamp >. state_expiration_time {
     True -> state |> handle_sync_internal
     False -> state
   }
+  echo "syncstate completes"
+  echo timestamp.system_time()
+  out
 }
 
 //all of these operations are specific to files
@@ -157,13 +230,23 @@ fn handle_delete(index, state) -> State {
 }
 
 fn handle_get(client, state: State) -> State {
-  process.send(client, state.existing_hashes)
-  state
+  let new_state = sync_state_if_required(state)
+  process.send(client, new_state.existing_hashes)
+  new_state
 }
 
 //calls the server for sync
 fn handle_sync_internal(state: State) -> State {
-  call_server(SyncReq, state)
+  echo "calling server"
+  echo timestamp.system_time()
+  echo call_server(SyncReq, state)
+  echo "calling server complete"
+  echo timestamp.system_time()
+  State(
+    ..call_server(SyncReq, state),
+    latest_fetch_timestamp: timestamp.system_time()
+      |> timestamp.to_unix_seconds,
+  )
 }
 
 fn handle_sync(client, state: State) -> State {
@@ -173,8 +256,14 @@ fn handle_sync(client, state: State) -> State {
 }
 
 fn handle_message(state: State, message: Message) {
-  sync_state_if_required(state)
-  |> handle_message_internal(message, _)
+  echo "handle message starts"
+  echo timestamp.system_time()
+  let out =
+    sync_state_if_required(state)
+    |> handle_message_internal(message, _)
+  echo "handle message completes"
+  echo timestamp.system_time()
+  out
 }
 
 fn handle_message_internal(message: Message, state: State) {
@@ -203,11 +292,14 @@ pub type State {
 }
 
 pub fn start_connection(config: ConnectionConfig) {
+  echo "calling fetch state"
   let state =
     State([], config, timestamp.system_time() |> timestamp.to_unix_seconds())
-
+    |> handle_sync_internal
   let assert Ok(actor) =
     actor.new(state) |> actor.on_message(handle_message) |> actor.start
-  process.call(actor.data, 3000, SyncState)
+
+  echo "synced"
+  echo state.existing_hashes
   actor.data
 }
