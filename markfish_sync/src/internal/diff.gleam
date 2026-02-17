@@ -71,8 +71,9 @@ pub fn get_new_context(existing_state: List(Int)) {
   |> refill_set(global_lookup_size)
 }
 
-pub fn clear(context: Context) -> #(Context, Operation) {
-  case context.lookup |> set.is_empty {
+pub fn clear(new_context: Context) -> #(Context, Operation) {
+  let context = new_context |> refill_set(global_lookup_size)
+  case context.lookup_elements |> deque.is_empty {
     False -> #(context |> shrink_set |> refill_set(1), Delete(context.index))
     True -> #(context, DoNothing)
   }
