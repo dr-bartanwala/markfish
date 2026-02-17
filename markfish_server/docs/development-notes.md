@@ -1,4 +1,28 @@
 # Rough Development Notes
+7/2/26
+-> Completed the diffining algorithm implementation
+-> Architecture of the sync server
+
+actors: 
+Main: -> maintains a server process (running continously)
+Sync: -> Main invokes a sync process on a given file
+
+Server: 
+
+1. main process, maintains the context
+2. server process, handles communications with the server
+
+6/2/26
+-> Diffing Algo Implementation
+-> ChunkStream, actor which returns the next chunk on every call
+-> When stream-completed returns, EOF chunk
+
+-> Main Service, calls ChunkStream -> executes one operation from the algorithm
+-> Moves on the next iteration
+-> On EOF, executes the pruning
+
+
+
 5/2/26
 -> Covered up the parser
 -> Implemented the rolling FNV hash
@@ -120,11 +144,10 @@ improvised algo:
 //these are basically hashes, in Int
 stream = G P O Q M B C R S T U V
 copy_of_serverState = [A B C D E F G R S T U V]
-
 actual_serverState = [A B C D E F G R S T U V]
 
 index = 0
-dict[]
+set[]
 
 while(stream){
     E = stream.next
@@ -140,6 +163,7 @@ while(stream){
         serverState.insert(Index, E)
         index++
 }
+
 while(list.notempty){
     remove_elements
 }
