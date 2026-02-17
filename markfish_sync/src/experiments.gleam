@@ -18,7 +18,6 @@ fn sync_loop(stream, context: Context, server_addr) {
 
   case break {
     True -> {
-      echo chunk
       sync(True, chunk.chunk_hash, new_context, handle_operation)
     }
 

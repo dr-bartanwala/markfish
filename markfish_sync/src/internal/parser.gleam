@@ -8,7 +8,6 @@ const fnv_prime = 1_099_511_628_211
 
 const fnv_offset_basis = 14_695_981_039_346_656_037
 
-//we are using 64bit fnv
 const fnv_mask_64 = 0xffffffffffffffff
 
 pub type Chunk {

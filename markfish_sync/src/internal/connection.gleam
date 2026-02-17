@@ -13,7 +13,7 @@ import gleam/time/timestamp
 
 import gleam/bit_array
 
-const state_expiration_time = 500.0
+const state_expiration_time = 120.0
 
 const data_delimiter = "||"
 
@@ -40,10 +40,7 @@ pub type Message {
 }
 
 fn call_server_internal(address: String, body: String) -> String {
-  echo "calling server"
-  echo timestamp.system_time()
   let assert Ok(base_req) = request.to(address)
-
   let req =
     base_req
     |> request.set_method(http.Post)
@@ -51,50 +48,7 @@ fn call_server_internal(address: String, body: String) -> String {
     |> request.prepend_header("accept", "text/plain; charset=UTF-8")
     |> request.set_body(body)
 
-  echo "req"
-  echo req
-
-  let out = case hackney.send(req) {
-    Ok(resp) -> {
-      case resp.status == 200 {
-        True -> resp.body
-        False -> {
-          echo "call failed"
-          echo resp.body
-          ""
-        }
-      }
-    }
-    _ -> {
-      echo "threw error"
-      ""
-    }
-  }
-
-  echo "calling server complete"
-  echo timestamp.system_time()
-  out
-}
-
-fn not_call_server_internal(address: String, body: String) -> String {
-  echo "calling server"
-  echo timestamp.system_time()
-  let req = request.to(address)
-  echo req
-  let base_req =
-    request.new()
-    |> request.set_method(http.Post)
-    |> request.set_host("127.0.0.1")
-    |> request.set_port(8000)
-    |> request.set_path("/message")
-    |> request.set_scheme(http.Http)
-
-  let req =
-    request.prepend_header(base_req, "accept", "text/plain; charset=UTF-8")
-    |> request.prepend_header("connection", "keep-alive")
-    |> request.set_body(body)
-
-  let out = case httpc.send(req) {
+  case hackney.send(req) {
     Ok(resp) -> {
       case resp.status == 200 {
         True -> resp.body
@@ -109,9 +63,6 @@ fn not_call_server_internal(address: String, body: String) -> String {
       ""
     }
   }
-  echo "calling server complete"
-  echo timestamp.system_time()
-  out
 }
 
 fn get_list_from_bitarray(array: BitArray, acc: List(Int)) {
@@ -156,10 +107,6 @@ fn call_server(request: ServerRequest, state: State) -> State {
       |> call_server_internal(state.config.server_address <> "/message", _)
 
     case output {
-      "" if request == SyncReq -> {
-        echo "this was a sync request still empty"
-        state
-      }
       "" -> {
         state
       }
@@ -187,25 +134,16 @@ fn encode_to_base64(msg: Message) -> ServerRequest {
 }
 
 fn sync_state_if_required(state: State) -> State {
-  echo "syncstate check starts"
-  echo timestamp.system_time()
   let state_timestamp: Float = state.latest_fetch_timestamp
   let current_timestamp: Float =
     timestamp.system_time() |> timestamp.to_unix_seconds
 
-  let out = case current_timestamp -. state_timestamp >. state_expiration_time {
+  case current_timestamp -. state_timestamp >. state_expiration_time {
     True -> state |> handle_sync_internal
     False -> state
   }
-  echo "syncstate completes"
-  echo timestamp.system_time()
-  out
 }
 
-//all of these operations are specific to files
-//locally, the state will be stored as, .filename.markfish.state
-//it will try to get the state from this
-//if the file doesn't exist, it will return false
 fn apply_insert(current_state: List(Int), index: Int, val: Int) -> List(Int) {
   let #(before, after) = current_state |> list.split(index)
   list.flatten([before, [val], after])
@@ -235,13 +173,7 @@ fn handle_get(client, state: State) -> State {
   new_state
 }
 
-//calls the server for sync
 fn handle_sync_internal(state: State) -> State {
-  echo "calling server"
-  echo timestamp.system_time()
-  echo call_server(SyncReq, state)
-  echo "calling server complete"
-  echo timestamp.system_time()
   State(
     ..call_server(SyncReq, state),
     latest_fetch_timestamp: timestamp.system_time()
@@ -256,14 +188,8 @@ fn handle_sync(client, state: State) -> State {
 }
 
 fn handle_message(state: State, message: Message) {
-  echo "handle message starts"
-  echo timestamp.system_time()
-  let out =
-    sync_state_if_required(state)
-    |> handle_message_internal(message, _)
-  echo "handle message completes"
-  echo timestamp.system_time()
-  out
+  sync_state_if_required(state)
+  |> handle_message_internal(message, _)
 }
 
 fn handle_message_internal(message: Message, state: State) {
@@ -292,14 +218,10 @@ pub type State {
 }
 
 pub fn start_connection(config: ConnectionConfig) {
-  echo "calling fetch state"
   let state =
     State([], config, timestamp.system_time() |> timestamp.to_unix_seconds())
     |> handle_sync_internal
   let assert Ok(actor) =
     actor.new(state) |> actor.on_message(handle_message) |> actor.start
-
-  echo "synced"
-  echo state.existing_hashes
   actor.data
 }
