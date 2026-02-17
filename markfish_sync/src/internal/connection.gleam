@@ -3,9 +3,6 @@ import gleam/erlang/process.{type Subject}
 import gleam/hackney
 import gleam/http
 import gleam/http/request
-import gleam/http/response
-import gleam/httpc
-import gleam/int
 import gleam/list
 import gleam/otp/actor
 import gleam/result
