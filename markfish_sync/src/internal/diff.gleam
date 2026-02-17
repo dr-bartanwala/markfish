@@ -16,7 +16,12 @@ pub type Context {
     pending: List(Int),
     lookup: Set(Int),
     lookup_elements: Deque(Int),
+    debug_info: DebugInfo,
   )
+}
+
+pub type DebugInfo {
+  DebugInfo(required_sync: Bool, insert_count: Int, delete_count: Int)
 }
 
 pub fn sync(
@@ -31,6 +36,32 @@ pub fn sync(
   }
 }
 
+fn apply_debug_operation(context: Context, op: Operation) -> Context {
+  case op {
+    Delete(_) -> {
+      Context(
+        ..context,
+        debug_info: DebugInfo(
+          ..context.debug_info,
+          delete_count: context.debug_info.delete_count + 1,
+          required_sync: True,
+        ),
+      )
+    }
+    Insert(_, _) ->
+      Context(
+        ..context,
+        debug_info: DebugInfo(
+          ..context.debug_info,
+          insert_count: context.debug_info.insert_count + 1,
+          required_sync: True,
+        ),
+      )
+
+    _ -> context
+  }
+}
+
 fn clear_loop(
   context: Context,
   handle_operation: fn(Operation) -> Nil,
@@ -39,7 +70,9 @@ fn clear_loop(
     #(new_context, DoNothing) -> new_context
     #(new_context, op) -> {
       handle_operation(op)
-      new_context |> clear_loop(handle_operation)
+      new_context
+      |> apply_debug_operation(op)
+      |> clear_loop(handle_operation)
     }
   }
 }
@@ -52,11 +85,15 @@ fn diff_loop(
   case diff(new_hash, context, global_lookup_size) {
     #(new_context, Delete(index)) -> {
       handle_operation(Delete(index))
-      diff_loop(new_hash, new_context, handle_operation)
+      diff_loop(
+        new_hash,
+        new_context |> apply_debug_operation(Delete(index)),
+        handle_operation,
+      )
     }
     #(new_context, op) -> {
       handle_operation(op)
-      new_context
+      new_context |> apply_debug_operation(op)
     }
   }
 }
@@ -67,6 +104,7 @@ pub fn get_new_context(existing_state: List(Int)) {
     pending: existing_state,
     lookup: set.new(),
     lookup_elements: deque.new(),
+    debug_info: DebugInfo(False, 0, 0),
   )
   |> refill_set(global_lookup_size)
 }
@@ -128,7 +166,8 @@ fn extend_set(context: Context) -> Context {
   case context.pending {
     [curr, ..rest] ->
       Context(
-        context.index + 1,
+        ..context,
+        index: context.index + 1,
         lookup: context.lookup |> set.insert(curr),
         pending: rest,
         lookup_elements: context.lookup_elements |> deque.push_back(curr),
