@@ -1,11 +1,7 @@
 import envoy
-import file_streams/file_stream
 import filepath
 import gleam/erlang/process.{type Subject}
-import gleam/int
-import gleam/list
 import gleam/otp/actor
-import gleam/result
 import simplifile
 
 pub type FilemanMessage {
@@ -105,8 +101,6 @@ type State {
   )
 }
 
-//fileman  
-//gets the file name as {appends data dir}/dir/file/etc
 pub fn start_fileman() {
   let assert Ok(directory) = envoy.get("DIR")
   let file_reader = get_filereader(directory)

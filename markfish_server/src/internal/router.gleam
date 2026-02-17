@@ -8,7 +8,7 @@ import gleam/list
 import gleam/result
 import gleam/string
 import gleam/time/timestamp
-import internal/state.{type StateMessage, Add, Get, Remove, Sync}
+import internal/stateman.{type StatemanMessage, Add, Get, Remove, Sync}
 
 const delimiter = "||"
 
@@ -22,6 +22,18 @@ type Operation {
 type Stream {
   Chunk(BitArray)
   Done
+}
+
+pub fn router(req: Request, state) -> Response {
+  case req |> request.path_segments {
+    [] -> handle_file_request(req, state, "home")
+
+    ["message"] -> handle_message(req, state)
+
+    ["file", file_name] -> handle_file_request(req, state, file_name)
+
+    _ -> return_invalid_response()
+  }
 }
 
 fn stream_file(
@@ -44,6 +56,7 @@ fn stream_file(
 }
 
 fn send_file(req: Request, folded_file_name: String, state) -> Response {
+  //calling stateman for getting the hashes 
   let hashes = process.call(state, 100, Sync(_, folded_file_name))
   ewe.chunked_body(
     req,
@@ -120,29 +133,20 @@ fn determine_operation(base64_data: String) -> Operation {
 fn execute_operation(folded_file_name, operation: Operation, state) -> Response {
   case operation {
     Insert(index, hash, block_data) -> {
-      echo "Executing Insert"
-      echo timestamp.system_time()
       process.send(state, Add(folded_file_name, index, hash, block_data))
-      echo timestamp.system_time()
       return_valid_response()
     }
     Delete(index) -> {
-      echo "Executing Delete"
       process.send(state, Remove(folded_file_name, index))
-      echo timestamp.system_time()
       return_valid_response()
     }
     Fetch -> {
-      echo "Executing Fetch"
-      echo timestamp.system_time()
-      let data =
-        process.call(state, 100, Sync(_, folded_file_name))
-        |> list.fold(<<>>, fn(acc: BitArray, val: Int) -> BitArray {
-          acc |> bit_array.append(<<val:64>>)
-        })
-        |> bit_array.base64_encode(True)
-      echo timestamp.system_time()
-      data |> return_sync_response
+      process.call(state, 100, Sync(_, folded_file_name))
+      |> list.fold(<<>>, fn(acc: BitArray, val: Int) -> BitArray {
+        acc |> bit_array.append(<<val:64>>)
+      })
+      |> bit_array.base64_encode(True)
+      |> return_sync_response
     }
     Invalid -> {
       return_invalid_response()
@@ -221,9 +225,7 @@ fn fold_file_name(file_name: String) -> Result(String, Nil) {
 }
 
 fn handle_message(req: Request, state) -> Response {
-  echo "starting handle message"
-  echo timestamp.system_time()
-  let out = case req |> ewe.read_body(10_240) {
+  case req |> ewe.read_body(10_240) {
     Ok(ewe_req) -> {
       ewe_req.body
       |> bit_array.to_string
@@ -232,28 +234,11 @@ fn handle_message(req: Request, state) -> Response {
     }
     Error(_) -> return_invalid_response()
   }
-  echo "handle message ends"
-  echo timestamp.system_time()
-  out
 }
 
 fn handle_file_request(req: Request, state, file_name: String) -> Response {
   case file_name |> fold_file_name {
     Ok(folded_file_name) -> send_file(req, folded_file_name, state)
-    _ -> return_invalid_response()
-  }
-}
-
-pub fn router(req: Request, state) -> Response {
-  case req |> request.path_segments {
-    [] -> {
-      response.new(200)
-      |> response.set_header("content-type", "text/html")
-      |> response.set_body(ewe.TextData("<h1> hello world !!!</h1>"))
-    }
-    ["message"] -> handle_message(req, state)
-
-    ["file", file_name] -> handle_file_request(req, state, file_name)
     _ -> return_invalid_response()
   }
 }
