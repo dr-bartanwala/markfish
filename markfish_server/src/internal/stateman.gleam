@@ -12,6 +12,7 @@ import mork
 pub type StatemanMessage {
   Add(file: String, index: Int, blockhash: Int, blockdata: String)
   Get(reply_with: Subject(String), file: String, blockhash: Int)
+  GetRaw(reply_with: Subject(String), file: String)
   Remove(file: String, index: Int)
   Sync(reply_with: Subject(List(Int)), file: String)
 }
@@ -36,6 +37,11 @@ fn get_filename(file: String, blockhash: Int) -> String {
 
 fn get_blockdata_filename(file: String) -> String {
   "/data/" <> file <> "/blockdata.markfish"
+}
+
+//this function expects the file to arrive with extension
+fn get_raw_filename(file: String) -> String {
+  "/raw_data/" <> file
 }
 
 fn apply_insert(current_state: List(Int), index: Int, val: Int) -> List(Int) {
@@ -106,6 +112,10 @@ fn handle_sync(state: InternalState, file: String) -> List(Int) {
   read_blockdata(state, file)
 }
 
+fn handle_get_raw(state: InternalState, file: String) -> String {
+  process.call(state.fileman, 1000, ReadFile(_, get_raw_filename(file)))
+}
+
 fn handle_message(state: InternalState, msg: StatemanMessage) {
   case msg {
     Add(file, index, blockhash, blockdata) -> {
@@ -131,6 +141,11 @@ fn handle_message(state: InternalState, msg: StatemanMessage) {
 
     Get(client, file, blockhash) -> {
       handle_get(state, file, blockhash) |> process.send(client, _)
+      actor.continue(state)
+    }
+
+    GetRaw(client, file) -> {
+      handle_get_raw(state, file) |> process.send(client, _)
       actor.continue(state)
     }
   }

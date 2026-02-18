@@ -6,9 +6,15 @@ import gleam/http/response
 import gleam/list
 import gleam/result
 import gleam/string
-import internal/stateman.{Add, Get, Remove, Sync}
+import internal/stateman.{Add, Get, GetRaw, Remove, Sync}
 
 const delimiter = "||"
+
+const header_file = "config/header.html"
+
+const style_file = "config/style.html"
+
+const footer_file = "config/footer.html"
 
 pub type RouterConfig {
   RouterConfig(user: String, password: String)
@@ -28,11 +34,11 @@ type Stream {
 
 pub fn router(req: Request, state, config: RouterConfig) -> Response {
   case req.path {
-    "/" -> handle_file_request(req, state, "home")
+    "/" -> handle_file_request(req, state, "kitchen")
 
     "/message" -> handle_message(req, state, config)
 
-    "/file/" <> file_name ->
+    "/" <> file_name ->
       handle_file_request(req, state, file_name |> clean_file_name)
 
     _ -> return_invalid_response()
@@ -51,15 +57,39 @@ fn stream_file(
 ) {
   case block_hashes {
     [hash, ..rest] -> {
-      let data =
-        process.call(state, 100, Get(_, file_name, hash))
-        |> bit_array.from_string
-
-      process.send(subject, Chunk(data))
+      process.call(state, 100, Get(_, file_name, hash))
+      |> bit_array.from_string
+      |> Chunk
+      |> process.send(subject, _)
       stream_file(file_name, rest, subject, state)
     }
-    [] -> process.send(subject, Done)
+    [] -> Nil
   }
+}
+
+//the append config file is needed for setting up the configuration
+fn append_header_file(subject: Subject(Stream), state) {
+  let data = process.call(state, 100, GetRaw(_, header_file))
+  Chunk(
+    data
+    |> bit_array.from_string,
+  )
+  |> process.send(subject, _)
+}
+
+fn append_footer_file(subject: Subject(Stream), state) {
+  process.call(state, 30_000, GetRaw(_, footer_file))
+  |> bit_array.from_string
+  |> Chunk
+  |> process.send(subject, _)
+  process.send(subject, Done)
+}
+
+fn append_styles_file(subject: Subject(Stream), state) {
+  process.call(state, 30_000, GetRaw(_, style_file))
+  |> bit_array.from_string
+  |> Chunk
+  |> process.send(subject, _)
 }
 
 fn send_file(req: Request, file_name: String, state) -> Response {
@@ -70,16 +100,27 @@ fn send_file(req: Request, file_name: String, state) -> Response {
     response.new(200) |> response.set_header("content-type", "text/html"),
     on_init: fn(subject) {
       let _pid =
-        fn() { stream_file(file_name, hashes, subject, state) }
+        fn() {
+          append_styles_file(subject, state)
+          append_header_file(subject, state)
+          stream_file(file_name, hashes, subject, state)
+          append_footer_file(subject, state)
+        }
         |> process.spawn
     },
     handler: fn(chunked_body, state, message) {
       case message {
-        Chunk(data) ->
-          case ewe.send_chunk(chunked_body, data) {
-            Ok(Nil) -> ewe.chunked_continue(state)
-            Error(_) -> ewe.chunked_stop_abnormal("Failed to send chunk")
+        Chunk(data) -> {
+          case data {
+            <<>> -> ewe.chunked_continue(state)
+            _ -> {
+              case ewe.send_chunk(chunked_body, data) {
+                Ok(Nil) -> ewe.chunked_continue(state)
+                Error(_) -> ewe.chunked_stop_abnormal("Failed to send chunk")
+              }
+            }
           }
+        }
         Done -> ewe.chunked_stop()
       }
     },
