@@ -1,0 +1,23 @@
+services:
+  markfish_server:
+    image: ghcr.io/gleam-lang/gleam:v1.14.0-erlang-alpine
+    container_name: markfish_server
+    working_dir: /app
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./raw_data:/app/raw_data
+      - server_build:/app/build
+      - gleam_cache:/root/.cache/gleam
+    ports:
+      - "8080:8080"
+      - "4000:4000"
+    command: gleam run
+    environment:
+      - USER="default"
+      - PASS="default"
+    restart: unless-stopped
+
+volumes:
+  server_build:
+  gleam_cache:
