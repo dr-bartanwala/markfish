@@ -10,7 +10,7 @@ import gleam/time/timestamp
 
 import gleam/bit_array
 
-const state_expiration_time = 120.0
+const state_expiration_time = 30.0
 
 const data_delimiter = "||"
 

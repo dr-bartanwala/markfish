@@ -10,12 +10,12 @@ services:
       - server_build:/app/build
       - gleam_cache:/root/.cache/gleam
     ports:
-      - "8080:8080"
+      - "8000:8000"
       - "4000:4000"
     command: gleam run
     environment:
-      - USER="default"
-      - PASS="default"
+      - USER=default
+      - PASS=default
     restart: unless-stopped
 
 volumes:

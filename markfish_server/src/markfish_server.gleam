@@ -6,7 +6,7 @@ import internal/router.{RouterConfig, router}
 import internal/stateman.{start_stateman}
 
 pub fn main() -> Nil {
-  let dir = "/app/data"
+  let dir = "."
   let assert Ok(user) = envoy.get("USER")
   let assert Ok(pass) = envoy.get("PASS")
 
