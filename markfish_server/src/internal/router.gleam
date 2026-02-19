@@ -35,7 +35,7 @@ type Stream {
 
 pub fn router(req: Request, state, config: RouterConfig) -> Response {
   case req.path {
-    "/" -> handle_file_request(req, state, "kitchen")
+    "/" -> handle_file_request(req, state, "Kitchen")
 
     "/message" -> handle_message(req, state, config)
 
