@@ -7,6 +7,7 @@ import gleam/list
 import gleam/result
 import gleam/string
 import internal/stateman.{Add, Get, GetRaw, Remove, Sync}
+import logging.{Alert, Info}
 
 const delimiter = "||"
 
@@ -41,7 +42,10 @@ pub fn router(req: Request, state, config: RouterConfig) -> Response {
     "/" <> file_name ->
       handle_file_request(req, state, file_name |> clean_file_name)
 
-    _ -> return_invalid_response()
+    _ -> {
+      logging.log(logging.Alert, "invalid request path: " <> req.path)
+      return_invalid_response()
+    }
   }
 }
 
@@ -94,6 +98,7 @@ fn append_styles_file(subject: Subject(Stream), state) {
 
 fn send_file(req: Request, file_name: String, state) -> Response {
   //calling stateman for getting the hashes 
+  logging.log(Info, "handling send_file for filename: " <> file_name)
   let hashes = process.call(state, 100, Sync(_, file_name))
   ewe.chunked_body(
     req,
@@ -105,6 +110,7 @@ fn send_file(req: Request, file_name: String, state) -> Response {
           append_header_file(subject, state)
           stream_file(file_name, hashes, subject, state)
           append_footer_file(subject, state)
+          logging.log(Info, "filestream completed")
         }
         |> process.spawn
     },
@@ -157,10 +163,19 @@ fn determine_operation(base64_data: String) -> Operation {
               |> result.unwrap("")
               |> Insert(index, hash, _)
             }
-            _ -> Invalid
+            _ -> {
+              logging.log(
+                logging.Error,
+                "invalid insert body after index: " <> base64_data,
+              )
+              Invalid
+            }
           }
         }
-        _ -> Invalid
+        _ -> {
+          logging.log(logging.Error, "invalid insert body: " <> base64_data)
+          Invalid
+        }
       }
     }
     Ok(<<first_int:64, rest:bits>>) if first_int == 0 -> {
@@ -168,27 +183,36 @@ fn determine_operation(base64_data: String) -> Operation {
         <<index:64>> -> {
           Delete(index)
         }
-        _ -> Invalid
+        _ -> {
+          logging.log(logging.Error, "invalid delete body: " <> base64_data)
+          Invalid
+        }
       }
     }
     Ok(<<first_int:64>>) if first_int == 2 -> {
       Fetch
     }
-    _ -> Invalid
+    _ -> {
+      logging.log(logging.Error, "invalid operation body: " <> base64_data)
+      Invalid
+    }
   }
 }
 
 fn execute_operation(file_name, operation: Operation, state) -> Response {
   case operation {
     Insert(index, hash, block_data) -> {
+      logging.log(Info, "handling insert")
       process.send(state, Add(file_name, index, hash, block_data))
       return_valid_response()
     }
     Delete(index) -> {
+      logging.log(Info, "handling delete")
       process.send(state, Remove(file_name, index))
       return_valid_response()
     }
     Fetch -> {
+      logging.log(Info, "handling fetch")
       process.call(state, 100, Sync(_, file_name))
       |> list.fold(<<>>, fn(acc: BitArray, val: Int) -> BitArray {
         acc |> bit_array.append(<<val:64>>)
@@ -203,6 +227,7 @@ fn execute_operation(file_name, operation: Operation, state) -> Response {
 }
 
 fn execute_message(file_name: String, base64_data: String, state) -> Response {
+  logging.log(Info, "handling message execution")
   determine_operation(base64_data)
   |> execute_operation(file_name, _, state)
 }
@@ -226,13 +251,26 @@ fn authenticate_and_proceed(
       case expand_file_path(file_name) {
         Ok(expanded_file_name) ->
           execute_message(expanded_file_name, base64_data, state)
-        Error(_) -> return_invalid_response()
+        Error(_) -> {
+          logging.log(
+            Alert,
+            "invalid filepath expansion for filepath: " <> file_name,
+          )
+          return_invalid_response()
+        }
       }
-    False -> return_invalid_response()
+    False -> {
+      logging.log(
+        Alert,
+        "invalid authentication for message: " <> user <> " | " <> password,
+      )
+      return_invalid_response()
+    }
   }
 }
 
 fn handle_message_internal(body: String, state, config) -> Response {
+  logging.log(Info, "handling message body")
   case body |> string.split(delimiter) {
     [user, password, file_name, base64_data] ->
       authenticate_and_proceed(
@@ -244,12 +282,14 @@ fn handle_message_internal(body: String, state, config) -> Response {
         config,
       )
     _ -> {
+      logging.log(logging.Error, "invalid split for message body: " <> body)
       return_invalid_response()
     }
   }
 }
 
 fn handle_message(req: Request, state, config) -> Response {
+  logging.log(Info, "handling message")
   case req |> ewe.read_body(10_240) {
     Ok(ewe_req) -> {
       ewe_req.body
@@ -257,13 +297,20 @@ fn handle_message(req: Request, state, config) -> Response {
       |> result.unwrap("")
       |> handle_message_internal(state, config)
     }
-    Error(_) -> return_invalid_response()
+    Error(_) -> {
+      logging.log(logging.Error, "invalid message body")
+      return_invalid_response()
+    }
   }
 }
 
 fn handle_file_request(req: Request, state, file_name: String) -> Response {
+  logging.log(Info, "handling file request for file_name: " <> file_name)
   case expand_file_path(file_name) {
     Ok(expanded_file_name) -> send_file(req, expanded_file_name, state)
-    Error(_) -> return_invalid_response()
+    Error(_) -> {
+      logging.log(logging.Alert, "invalid filepath expansion: " <> file_name)
+      return_invalid_response()
+    }
   }
 }

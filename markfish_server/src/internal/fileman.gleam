@@ -1,6 +1,7 @@
 import filepath
 import gleam/erlang/process.{type Subject}
 import gleam/otp/actor
+import logging.{Info}
 import simplifile
 
 //receives validated & expanded filenames from the router
@@ -104,5 +105,6 @@ pub fn start_fileman(directory) {
     actor.new(State(file_reader, file_writer, directory))
     |> actor.on_message(handle_message)
     |> actor.start
+  logging.log(Info, "started fileman on directory: " <> directory)
   actor.data
 }

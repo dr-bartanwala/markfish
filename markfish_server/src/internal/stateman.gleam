@@ -7,6 +7,7 @@ import gleam/string
 import internal/fileman.{
   type FilemanMessage, DeleteFile, ReadFile, WriteFile, start_fileman,
 }
+import logging.{Info}
 import mork
 
 pub type StatemanMessage {
@@ -26,6 +27,7 @@ pub fn start_stateman(directory) {
   let state = InternalState(fileman)
   let assert Ok(actor) =
     actor.new(state) |> actor.on_message(handle_message) |> actor.start
+  logging.log(Info, "started stateman on directory: " <> directory)
   actor.data
 }
 
